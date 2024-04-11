@@ -1255,15 +1255,13 @@ class MegatronGPTModel(MegatronBaseModel, TextGeneration):
             for model_module in self.model:
                 model_module.eval()
                 for name, module in model_module.named_modules():
-                    if "fused_attention" in name:
-                        if hasattr(module, "training"):
-                            module.training = True
+                    if "fused_attention" in name and hasattr(module, "training"):
+                        module.training = True
         else:
             self.model.eval()
             for name, module in self.model.named_modules():
-                if "fused_attention" in name:
-                    if hasattr(module, "training"):
-                        module.training = True
+                if "fused_attention" in name and hasattr(module, "training"):
+                    module.training = True
 
         if self.cfg.get('fp8', False):
             first_val_step = self.prev_step_training and not self.training
