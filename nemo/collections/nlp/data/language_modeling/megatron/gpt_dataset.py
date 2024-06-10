@@ -468,8 +468,6 @@ class MockGPTDataset(Dataset):
         self.seed = seed
         self.get_attention_mask_from_fusion = cfg.get('get_attention_mask_from_fusion', True)
 
-        self.attention_mask = torch.tril(torch.ones((self.seq_length, self.seq_length))).unsqueeze(0)
-        self.attention_mask = self.attention_mask < 0.5
         self.loss_mask = torch.ones(self.seq_length, dtype=torch.float)
         self.position_ids = torch.arange(self.seq_length, dtype=torch.int64)
 
@@ -494,6 +492,8 @@ class MockGPTDataset(Dataset):
                 'position_ids': self.position_ids,
             }
         else:
+            self.attention_mask = torch.tril(torch.ones((self.seq_length, self.seq_length))).unsqueeze(0)
+            self.attention_mask = self.attention_mask < 0.5
             return {
                 'tokens': tokens,
                 'labels': labels,
