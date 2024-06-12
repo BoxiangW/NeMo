@@ -134,7 +134,8 @@ class AutocastTransformerLayer(TransformerLayer):
                     transformer_layer_args[ub_overlap_flag] = kwargs.get(split_gemm_flag, True) or kwargs.get(
                         atomic_gemm_flag, False
                     )
-            transformer_layer_args["ub_overlap_rs_dgrad"] = kwargs.get("ub_overlap_rs_dgrad", False)
+            if te_version > packaging.version.Version("1.6.0.dev0"):
+                transformer_layer_args["ub_overlap_rs_dgrad"] = kwargs.get("ub_overlap_rs_dgrad", False)
         else:
             transformer_layer_args["ub_split_ag"] = kwargs.get("ub_split_ag", True)
             transformer_layer_args["ub_split_rs"] = kwargs.get("ub_split_rs", True)
@@ -148,7 +149,7 @@ class AutocastTransformerLayer(TransformerLayer):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attention_mask: torch.Tensor,
+        attention_mask: torch.Tensor = None,
         encoder_output: Optional[torch.Tensor] = None,
         enc_dec_attn_mask: Optional[torch.Tensor] = None,
         inference_params: Optional[Any] = None,
@@ -168,7 +169,7 @@ class AutocastTransformerLayer(TransformerLayer):
         with torch.autocast(device_type="cuda", dtype=self.dtype):
             return super().forward(
                 hidden_states,
-                attention_mask,
+                attention_mask=attention_mask,
                 encoder_output=encoder_output,
                 enc_dec_attn_mask=enc_dec_attn_mask,
                 inference_params=inference_params,
@@ -225,9 +226,10 @@ class TETransformerLayerAutocast(AutocastTransformerLayer, BaseTransformerLayer)
                 if hasattr(config, "tp_comm_overlap_rs")
                 else config.tp_comm_split_rs or config.tp_comm_atomic_rs
             )
-            transformer_layer_args["ub_overlap_rs_dgrad"] = (
-                config.tp_comm_overlap_rs_dgrad if hasattr(config, "tp_comm_overlap_rs_dgrad") else False
-            )
+            if te_version > packaging.version.Version("1.6.0.dev0"):
+                transformer_layer_args["ub_overlap_rs_dgrad"] = (
+                    config.tp_comm_overlap_rs_dgrad if hasattr(config, "tp_comm_overlap_rs_dgrad") else False
+                )
         else:
             transformer_layer_args["ub_split_ag"] = config.tp_comm_split_ag
             transformer_layer_args["ub_split_rs"] = config.tp_comm_split_rs
@@ -240,25 +242,30 @@ class TETransformerLayerAutocast(AutocastTransformerLayer, BaseTransformerLayer)
     def forward(
         self,
         hidden_states,
-        attention_mask,
+        is_first_microbatch=None,
+        attention_mask=None,
         context=None,
         context_mask=None,
         rotary_pos_emb=None,
         inference_params=None,
         packed_seq_params=None,  # TODO: handle this
     ):
+        # Use is_first_microbatch argument during CUDA graph capture. Use self.is_first_microbatch otherwise.
         hidden_states = super().forward(
             hidden_states,
             attention_mask=attention_mask,
             encoder_output=context,
             enc_dec_attn_mask=context_mask,
             inference_params=inference_params,
-            is_first_microbatch=self.is_first_microbatch,
+            is_first_microbatch=is_first_microbatch if is_first_microbatch is not None else self.is_first_microbatch,
             # checkpoint_core_attention,
         )
         self.is_first_microbatch = False
         context = None
 
+        # CUDA graph requires returned values to be Tensors
+        if self.config.enable_cuda_graph and self.training:
+            return hidden_states
         return hidden_states, context
 
     def _get_layer_offset(self):
